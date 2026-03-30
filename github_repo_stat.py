@@ -269,57 +269,80 @@ def get_lifespan(repo_dir: str) -> tuple[str, str, int]:
 # Commit analysis — GraphQL
 # ---------------------------------------------------------------------------
 
-COMMIT_STATS_QUERY = """
-query($owner: String!, $repo: String!, $cursor: String) {
-  repository(owner: $owner, name: $repo) {
-    defaultBranchRef {
-      target {
-        ... on Commit {
-          history(first: 100, after: $cursor) {
-            pageInfo { hasNextPage endCursor }
-            nodes { additions deletions }
-          }
-        }
-      }
-    }
-  }
-}
-"""
+def _build_batch_query(shas: list[str], owner: str, repo: str) -> str:
+    """Build a GraphQL query that fetches stats for multiple commits by SHA."""
+    fragments = []
+    for i, sha in enumerate(shas):
+        fragments.append(
+            f'  c{i}: object(oid: "{sha}") {{ ... on Commit {{ additions deletions }} }}'
+        )
+    body = "\n".join(fragments)
+    return (
+        f'query {{\n'
+        f'  repository(owner: "{owner}", name: "{repo}") {{\n'
+        f'{body}\n'
+        f'  }}\n'
+        f'}}'
+    )
 
 
-def get_commit_stats_graphql(owner: str, repo: str,
-                             token: str) -> list[int]:
-    """Fetch per-commit additions+deletions via GitHub GraphQL API."""
-    lines_per_commit: list[int] = []
-    cursor = None
-    page = 0
+def _fetch_batch(shas: list[str], owner: str, repo: str,
+                 token: str) -> list[int]:
+    """Fetch commit stats for a batch of SHAs via GraphQL. Returns lines changed."""
+    query = _build_batch_query(shas, owner, repo)
+    data = _github_graphql(query, {}, token)
+    if not data or "repository" not in data:
+        return []
 
-    while True:
-        page += 1
-        variables = {"owner": owner, "repo": repo, "cursor": cursor}
-        data = _github_graphql(COMMIT_STATS_QUERY, variables, token)
-        if not data:
-            break
-
-        try:
-            history = (data["repository"]["defaultBranchRef"]
-                       ["target"]["history"])
-        except (KeyError, TypeError):
-            break
-
-        for node in history["nodes"]:
+    results = []
+    repo_data = data["repository"]
+    for i in range(len(shas)):
+        node = repo_data.get(f"c{i}")
+        if node:
             total = node.get("additions", 0) + node.get("deletions", 0)
             if total > 0:
-                lines_per_commit.append(total)
+                results.append(total)
+    return results
 
-        page_info = history["pageInfo"]
-        if not page_info["hasNextPage"]:
-            break
-        cursor = page_info["endCursor"]
 
-        # Progress indicator
-        if page % 10 == 0:
-            print(f"    ... fetched {len(lines_per_commit):,} commits")
+def get_commit_stats_graphql(owner: str, repo: str, token: str,
+                             repo_dir: str) -> list[int]:
+    """Fetch per-commit diff stats via parallel GraphQL batch queries.
+
+    Gets all commit SHAs from the local repo (blobless clone), then queries
+    GitHub in parallel batches of 50 SHAs using GraphQL aliases.
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    # Get all commit SHAs from local repo (instant on blobless clone)
+    result = subprocess.run(
+        ["git", "log", "--format=%H"],
+        cwd=repo_dir, capture_output=True, text=True, check=True,
+    )
+    all_shas = result.stdout.strip().split("\n")
+    if not all_shas or all_shas == [""]:
+        return []
+
+    # Chunk into batches of 50 (safe limit for GraphQL query complexity)
+    batch_size = 50
+    batches = [all_shas[i:i + batch_size]
+               for i in range(0, len(all_shas), batch_size)]
+
+    lines_per_commit: list[int] = []
+    completed = 0
+
+    with ThreadPoolExecutor(max_workers=10) as pool:
+        futures = {
+            pool.submit(_fetch_batch, batch, owner, repo, token): batch
+            for batch in batches
+        }
+        for future in as_completed(futures):
+            results = future.result()
+            lines_per_commit.extend(results)
+            completed += 1
+            if completed % 20 == 0 or completed == len(batches):
+                print(f"    ... {completed}/{len(batches)} batches "
+                      f"({len(lines_per_commit):,} commits)")
 
     return lines_per_commit
 
@@ -428,7 +451,7 @@ def main():
             if args.token and owner_repo:
                 print("Fetching per-commit diff stats via GitHub API ...")
                 commit_lines = get_commit_stats_graphql(
-                    owner_repo[0], owner_repo[1], args.token
+                    owner_repo[0], owner_repo[1], args.token, tmp_dir
                 )
                 if commit_lines:
                     print(f"  Fetched {len(commit_lines):,} commits.\n")
@@ -440,22 +463,44 @@ def main():
 
         # --- Report ---
         repo_name = url.rstrip("/").split("/")[-1].removesuffix(".git")
-        print(f"=== {repo_name} ===\n")
-
-        print(f"Total lines of code:  {file_stats['total_lines']:,}")
-        print(f"Number of files:      {file_stats['total_files']:,}")
-        print(f"Total commits:        {total_commits:,}")
-        print(f"Lifespan:             {lifespan_days:,} days "
-              f"({first_date} to {last_date})")
-
         loc_per_day = file_stats["total_lines"] / max(lifespan_days, 1)
-        print(f"LOC per day:          {loc_per_day:,.1f}")
+        size_line = (f"Repo size:            {repo_size_kb / 1024:,.0f} MB"
+                     if repo_size_kb is not None else
+                     "Repo size:            (unknown)")
 
-        print(f"\nLines of code per file:")
-        print(format_stats(file_stats["lines_per_file"]))
+        report = "\n".join([
+            f"=== {repo_name} ===",
+            "",
+            size_line,
+            f"Total lines of code:  {file_stats['total_lines']:,}",
+            f"Number of files:      {file_stats['total_files']:,}",
+            f"Total commits:        {total_commits:,}",
+            f"Lifespan:             {lifespan_days:,} days "
+            f"({first_date} to {last_date})",
+            f"LOC per day:          {loc_per_day:,.1f}",
+            "",
+            "Lines of code per file:",
+            format_stats(file_stats["lines_per_file"]),
+            "",
+            "Lines changed per commit:",
+            format_stats(commit_lines),
+        ])
 
-        print(f"\nLines changed per commit:")
-        print(format_stats(commit_lines))
+        print(report)
+
+        # --- Write to file ---
+        today = datetime.now().strftime("%Y-%m-%d")
+        owner_name = owner_repo[0] if owner_repo else "unknown"
+        stats_dir = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "stats"
+        )
+        os.makedirs(stats_dir, exist_ok=True)
+        stats_file = os.path.join(
+            stats_dir, f"{owner_name}-{repo_name}-{today}.txt"
+        )
+        with open(stats_file, "w", encoding="utf-8") as f:
+            f.write(report + "\n")
+        print(f"\nSaved to {stats_file}")
 
     except KeyboardInterrupt:
         print("\nInterrupted.", file=sys.stderr)

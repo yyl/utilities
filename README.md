@@ -18,10 +18,8 @@ uv sync
   - Total lines of code, file count, commit count, and repository lifespan.
   - LOC written per day.
   - Min/median/average/max for lines per file and lines changed per commit.
-  - **Smart cloning**: checks repo size via the GitHub API and picks the fastest strategy:
-    - **< 75 MB**: full clone (all stats computed locally).
-    - **≥ 75 MB**: shallow clone for file stats, GitHub GraphQL API for per-commit diff stats.
-    - If a full clone exceeds a 2-minute timeout, it automatically falls back to the shallow strategy.
-  - **Token**: reads `GITHUB_TOKEN` from a `.env` file in the script directory, the environment, or `--token`. A token is required for per-commit diff stats on large repos (GraphQL API) and for private repos.
-  - **Cleanup**: cloned repos are removed on exit, interrupt, or error. Stale temp dirs from previous crashed runs are cleaned up automatically on the next run.
+  - **Note**: A GitHub PAT token is required for private repositories, and highly recommended for large public repositories. Provide `GITHUB_TOKEN` via a `.env` file in the script directly, the environment, or the `--token` flag.
+  - The script outputs a summary to the console and automatically writes out a `.txt` report into the `stats/` directory.
   - Run it with: `uv run github_repo_stat.py <repo_url> [--token <your_token>]`
+
+(See [docs/GUIDE.md](docs/GUIDE.md) for technical setup and architectural details under the hood.)
