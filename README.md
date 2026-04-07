@@ -14,6 +14,11 @@ uv sync
 
 - `read_parquet.py`: This script reads a Parquet file, extracts and prints its schema using PyArrow, and then reads and prints the first few rows using Polars, providing a quick overview of the file's structure and content.
   - Run it with: `uv run read_parquet.py <file_path>`
+- `health_workout_extract.py`: Streams an Apple Health `export.xml` file in two passes and writes a much smaller XML containing all `Workout` elements plus overlapping `Record` and `Correlation` entries.
+  - Run it with: `uv run health_workout_extract.py export.xml [workouts_only.xml]`
+  - Optional flags:
+    - `--include-activity-summaries` to keep `ActivitySummary` entries too.
+    - `--types <RecordType> ...` to force-include specific top-level `Record` types even if they fall outside workout time windows.
 - `github_repo_stat.py`: Analyzes a GitHub repository's code and git history. Reports:
   - Total lines of code, file count, commit count, and repository lifespan.
   - LOC written per day.
