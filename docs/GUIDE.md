@@ -28,3 +28,14 @@ Because repositories can easily be hundreds of megabytes in size, the applicatio
 - Normal execution, keyboard interrupts (Ctrl+C), and runtime errors trigger standard cleanup via python `finally` blocks.
 - An `atexit` registered handler acts as a backup for unhandled process exits.
 - On startup, the script conducts a proactive sweep of the system's temporary directory, scanning for and purging orphaned directories leftover from any past abnormal terminations (like `kill -9` or hard OS crashes).
+
+## `tax_return_parser.py`
+
+### Extensible Dynamic DB Schema
+The repository used an earlier schema architecture involving pre-mapped YAML structures to extract tax data manually. To allow users to effortlessly add lines and forms out of scope without ever updating Python logic, it incorporates a dynamic schema build model:
+- The script looks up all defined row entries within the given `csv` string table.
+- These fields are dynamically translated into purely lowercase syntax attributes `f_{form}_{line}` inside the database schema to represent exactly what the user inputs (e.g., `f_1040_1z`).
+- Missing SQLite columns are subsequently built with active `ALTER TABLE tax_returns ADD COLUMN ...` statements safely before CSV reading proceeds to `UPSERT` injection.
+
+### Missing Data Extensibility
+Older forms will gracefully inherit updated tracking constraints without cascading query failures because the SQLite evolution is 100% backward compatible (the fields simply yield `NULL` when reading standard past-year models). The parser itself correctly validates all incoming string structures by recursively evaluating floating amounts for currency elements like `$` symbols, `(123)` negatives, and trailing whitespace sequences prior to injecting `REAL` variables locally.
