@@ -84,6 +84,116 @@ def get_return(db_path: str, year: int) -> dict | None:
         return dict(row) if row else None
 
 
+def init_analysis_db(db_path: str, fields: list[tuple[str, str, str, str]]) -> None:
+    """Create the tax_return_analysis table and dynamically evolve the schema."""
+    os.makedirs(os.path.dirname(db_path) or ".", exist_ok=True)
+    derived_cols = [
+        "effective_tax_rate_pct",
+        "capital_gain_short_vs_long_ratio_pct",
+        "ca_effective_tax_rate_pct",
+    ]
+    yoy_cols = [f"yoy_{db_col}_pct" for db_col, _, _, _ in fields]
+
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS tax_return_analysis (
+                tax_year    INTEGER PRIMARY KEY,
+                computed_at TEXT NOT NULL
+            )
+        """)
+
+        cursor = conn.execute("PRAGMA table_info(tax_return_analysis)")
+        existing_cols = {row[1] for row in cursor.fetchall()}
+
+        for col in derived_cols + yoy_cols:
+            if col not in existing_cols:
+                conn.execute(f"ALTER TABLE tax_return_analysis ADD COLUMN {col} REAL")
+
+
+def upsert_analysis(db_path: str, analysis: dict, fields: list[tuple[str, str, str, str]]) -> None:
+    """Insert or replace one analysis row in the database."""
+    now = datetime.now(timezone.utc).isoformat()
+    derived_cols = [
+        "effective_tax_rate_pct",
+        "capital_gain_short_vs_long_ratio_pct",
+        "ca_effective_tax_rate_pct",
+    ]
+    yoy_cols = [f"yoy_{db_col}_pct" for db_col, _, _, _ in fields]
+    yoy_values = {
+        f"yoy_{db_col}_pct": analysis["yoy_changes_pct"].get(db_col)
+        for db_col, _, _, _ in fields
+    }
+
+    cols = ["tax_year", "computed_at"] + derived_cols + yoy_cols
+    vals = [analysis["tax_year"], now]
+    vals.extend(analysis.get(col) for col in derived_cols)
+    vals.extend(yoy_values.get(col) for col in yoy_cols)
+
+    placeholders = ", ".join(["?"] * len(cols))
+    col_names = ", ".join(cols)
+
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            f"INSERT OR REPLACE INTO tax_return_analysis ({col_names}) VALUES ({placeholders})",
+            vals,
+        )
+
+
+def pct_change(current: float | None, previous: float | None) -> float | None:
+    """Calculate percent change from previous to current."""
+    if current is None or previous is None or previous == 0:
+        return None
+    return ((current - previous) / abs(previous)) * 100
+
+
+def ratio_pct(numerator: float | None, denominator: float | None) -> float | None:
+    """Calculate a ratio as a percentage."""
+    if numerator is None or denominator is None or denominator == 0:
+        return None
+    return (numerator / denominator) * 100
+
+
+def format_metric(value: float | None) -> str:
+    """Format a derived metric percentage for CLI output."""
+    return f"{value:.1f}%" if value is not None else "N/A"
+
+
+def build_analysis(records: list[dict], fields: list[tuple[str, str, str, str]]) -> tuple[list[dict], list[tuple[str, str]]]:
+    """Create derived analysis rows and YoY changes for each imported field."""
+    analyses = []
+    previous_record = None
+
+    for record in sorted(records, key=lambda r: r["tax_year"]):
+        analysis = {
+            "tax_year": record["tax_year"],
+            "effective_tax_rate_pct": ratio_pct(record.get("f_1040_24"), record.get("f_1040_15")),
+            "capital_gain_short_vs_long_ratio_pct": ratio_pct(record.get("f_d_7"), record.get("f_d_15")),
+            "ca_effective_tax_rate_pct": ratio_pct(record.get("f_540_64"), record.get("f_540_19")),
+            "yoy_changes_pct": {},
+        }
+
+        for db_col, desc, form, line in fields:
+            prev_val = previous_record.get(db_col) if previous_record else None
+            analysis["yoy_changes_pct"][db_col] = pct_change(record.get(db_col), prev_val)
+
+        analyses.append(analysis)
+        previous_record = record
+
+    derived_metrics = [
+        ("effective_tax_rate_pct", "Effective tax rate"),
+        ("capital_gain_short_vs_long_ratio_pct", "Capital gain short vs long-term ratio"),
+        ("ca_effective_tax_rate_pct", "CA effective tax rate"),
+    ]
+    return analyses, derived_metrics
+
+
+def store_analysis(db_path: str, analyses: list[dict], fields: list[tuple[str, str, str, str]]) -> None:
+    """Persist all analysis rows into the same SQLite database."""
+    init_analysis_db(db_path, fields)
+    for analysis in analyses:
+        upsert_analysis(db_path, analysis, fields)
+
+
 # ── CSV Parsing ─────────────────────────────────────────────────────────────
 
 def parse_value(val: str) -> float | None:
@@ -254,14 +364,14 @@ def show(year, filepath, db):
     click.echo("\n── Derived Metrics ──")
     has_metrics = False
     
-    if total_income is not None and total_tax is not None and total_income > 0:
-        effective_rate = (total_tax / total_income) * 100
+    if taxable_income is not None and total_tax is not None and taxable_income > 0:
+        effective_rate = (total_tax / taxable_income) * 100
         click.echo(f"Effective tax rate: {effective_rate:.1f}%")
         has_metrics = True
         
-    if taxable_income is not None and total_tax is not None and taxable_income > 0:
-        marginal_rate = (total_tax / taxable_income) * 100
-        click.echo(f"Tax / taxable income: {marginal_rate:.1f}%")
+    if total_income is not None and total_tax is not None and total_income > 0:
+        income_rate = (total_tax / total_income) * 100
+        click.echo(f"Tax as % of total income: {income_rate:.1f}%")
         has_metrics = True
         
     if not has_metrics:
@@ -291,6 +401,44 @@ def dump(db, filepath):
         rows.append(row)
 
     click.echo(tabulate(rows, headers=headers, tablefmt="simple"))
+
+
+@cli.command()
+@click.option("--file", "filepath", type=click.Path(exists=True), default=DEFAULT_CSV,
+              help="CSV file to load labels from")
+@click.option("--db", default=DEFAULT_DB, show_default=True, help="SQLite database path")
+def analyze(db, filepath):
+    """Show YoY analysis and derived tax metrics for all tax years."""
+    returns = get_all_returns(db)
+    if not returns:
+        click.echo("No data in database.")
+        return
+
+    fields, _, _ = extract_schema_from_csv(filepath)
+    analyses, derived_metrics = build_analysis(returns, fields)
+    store_analysis(db, analyses, fields)
+
+    click.echo("\n── Derived Metrics By Year ──")
+    metric_headers = ["Year"] + [label for _, label in derived_metrics]
+    metric_rows = []
+    for analysis in analyses:
+        metric_rows.append([
+            analysis["tax_year"],
+            *(format_metric(analysis[key]) for key, _ in derived_metrics),
+        ])
+    click.echo(tabulate(metric_rows, headers=metric_headers, tablefmt="simple"))
+
+    click.echo("\n── YoY Change (%) By Field ──")
+    yoy_headers = ["Field"] + [str(analysis["tax_year"]) for analysis in analyses]
+    yoy_rows = []
+    for db_col, desc, form, line in fields:
+        label = f"[{form}:{line}] {desc}"
+        row = [label]
+        for analysis in analyses:
+            row.append(format_metric(analysis["yoy_changes_pct"].get(db_col)))
+        yoy_rows.append(row)
+    click.echo(tabulate(yoy_rows, headers=yoy_headers, tablefmt="simple"))
+    click.echo(f"\nSaved {len(analyses)} analysis row(s) to tax_return_analysis.")
 
 
 if __name__ == "__main__":

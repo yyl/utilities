@@ -39,3 +39,30 @@ The repository used an earlier schema architecture involving pre-mapped YAML str
 
 ### Missing Data Extensibility
 Older forms will gracefully inherit updated tracking constraints without cascading query failures because the SQLite evolution is 100% backward compatible (the fields simply yield `NULL` when reading standard past-year models). The parser itself correctly validates all incoming string structures by recursively evaluating floating amounts for currency elements like `$` symbols, `(123)` negatives, and trailing whitespace sequences prior to injecting `REAL` variables locally.
+
+### Persisted Analysis Table
+The parser now stores derived multi-year analysis in a second SQLite table, `tax_return_analysis`, inside the same database as `tax_returns`.
+
+- `tax_returns` remains the source-of-truth table for imported values keyed by `tax_year`.
+- `tax_return_analysis` is keyed by the same `tax_year` and stores a `computed_at` timestamp plus derived metric columns:
+  - `effective_tax_rate_pct`
+  - `capital_gain_short_vs_long_ratio_pct`
+  - `ca_effective_tax_rate_pct`
+- The table also receives one dynamic YoY column per imported field using the pattern `yoy_<db_col>_pct`, for example `yoy_f_1040_24_pct`.
+- Like the main import table, analysis schema evolution is automatic via `ALTER TABLE`, so adding new CSV rows automatically creates matching YoY analysis columns the next time analysis is stored.
+
+### Analysis Flow
+The `analyze` command computes derived metrics from the imported rows and then persists them before printing the CLI report.
+
+1. Read all rows from `tax_returns` ordered by `tax_year`.
+2. Compute YoY percent change for each imported field using the prior year as the baseline.
+3. Compute derived ratios:
+   - Effective tax rate = `f_1040_24 / f_1040_15`
+   - Capital gain short-vs-long ratio = `f_d_7 / f_d_15`
+   - CA effective tax rate = `f_540_64 / f_540_19`
+4. Upsert one row per year into `tax_return_analysis`.
+
+### Notes On Interpretation
+- Effective tax rate is intentionally defined here as `Total tax / Taxable income`, not `Total tax / Total income`.
+- The first imported year has no prior-year baseline, so all `yoy_*` columns for that year remain `NULL`.
+- Any division with a missing or zero denominator also yields `NULL`, which keeps the stored analysis explicit and query-safe.
