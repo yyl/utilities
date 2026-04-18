@@ -4,24 +4,13 @@ This document contains technical details, under-the-hood implementations, and ar
 
 ## `statement_parser.py`
 
-### PDF Text Extraction
+### CSV Parsing
 
-The parser uses `pdfplumber` to extract text from each page of a Wealthfront bank statement PDF. Table extraction (`extract_tables`) was tested but only captures headers — the actual transaction rows render as free-form text, so regex-based line parsing is used instead.
+The parser uses the standard Python `csv` module to read Wealthfront bank statement CSVs. It expects a header row with at least the following columns: `Transaction date`, `Description`, `Type`, and `Amount`.
 
-### Transaction Line Format
+### Transaction Format
 
-Each transaction in the PDF spans two lines:
-
-```
-MM/DD/YYYY DESCRIPTION + $X,XXX.XX
-Subtype
-```
-
-The regex `TRANSACTION_RE` captures date, description, sign (+/-), and amount from the first line. A lookahead checks the next line for a subtype keyword (Debit, Deposit, Credit, Transfer, Interest, Fee, Withdrawal).
-
-### Section Detection
-
-The parser tracks whether it's inside the "TRANSACTIONS" or "SWEEP TRANSACTIONS" section to populate the `category` field. Sweep transactions are internal Green Dot ↔ Wealthfront Cash Account settlements and are stored separately from user-facing transactions.
+Transactions are read row-by-row from the CSV. The `Transaction date` (expected in `MM/DD/YYYY` format) is normalized to `YYYY-MM-DD`. The `Amount` is converted to a float, and `Type` is stored in the `subtype` field.
 
 ### SQLite Schema & Deduplication
 
@@ -40,7 +29,7 @@ CREATE TABLE IF NOT EXISTS transactions (
 );
 ```
 
-Unlike the QFX parser which uses `FITID` as a natural key, statement PDFs have no unique transaction identifier. Deduplication uses a composite unique constraint on `(date, description, amount, account_id)` with `INSERT OR IGNORE`. This means two genuinely identical transactions on the same day (same payee, same amount) would be deduplicated — an acceptable trade-off given how rare that is in practice.
+Unlike the QFX parser which uses `FITID` as a natural key, statement exports have no unique transaction identifier. Deduplication uses a composite unique constraint on `(date, description, amount, account_id)` with `INSERT OR IGNORE`. For CSV imports, `account_id` defaults to an empty string. This means two genuinely identical transactions on the same day (same payee, same amount) would be deduplicated — an acceptable trade-off given how rare that is in practice.
 
 ## github_repo_stat.py
 

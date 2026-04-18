@@ -22,10 +22,10 @@ This script reads a Parquet file, extracts and prints its schema using PyArrow, 
 
 ### `statement_parser.py`
 
-Parses Wealthfront bank statement PDFs and imports transactions into a SQLite database. Extracts date, description, amount, and subtype (Debit/Deposit) for both regular transactions and sweep (settlement) transactions. Deduplicates on `(date, description, amount, account_id)` — re-importing the same file is safe.
+Parses Wealthfront bank statement CSVs and imports transactions into a SQLite database. Extracts date, description, amount, and subtype (Type) from the CSV. Deduplicates on `(date, description, amount, account_id)` — re-importing the same file is safe.
 
-- Run it with: `uv run statement_parser.py data/example.pdf`
-- Supports multiple files at once: `uv run statement_parser.py data/*.pdf`
+- Run it with: `uv run statement_parser.py data/wf.csv`
+- Supports multiple files at once: `uv run statement_parser.py data/*.csv`
 - Optional flags:
   - `--db <path>` to specify the SQLite database path (default: `data/transactions.db`).
 
