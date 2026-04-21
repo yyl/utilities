@@ -4,13 +4,35 @@ This document contains technical details, under-the-hood implementations, and ar
 
 ## `statement_parser.py`
 
+### Format Auto-Detection
+
+The parser auto-detects the CSV source by inspecting the header row against known column sets:
+
+| Source       | Required columns                                                                   |
+|--------------|------------------------------------------------------------------------------------|
+| Wealthfront  | `Transaction date`, `Description`, `Type`, `Amount`                                |
+| Discover     | `Transaction Date`, `Transaction Description`, `Transaction Type`, `Debit`, `Credit`, `Balance` |
+
+Detection is case-insensitive and uses subset matching, so extra columns are tolerated. If no known format matches, the parser raises an error.
+
 ### CSV Parsing
 
-The parser uses the standard Python `csv` module to read Wealthfront bank statement CSVs. It expects a header row with at least the following columns: `Transaction date`, `Description`, `Type`, and `Amount`.
+Both parsers normalise dates from `MM/DD/YYYY` to `YYYY-MM-DD` and unify amounts into a single signed float (negative = money leaving the account).
 
-### Transaction Format
+- **Wealthfront**: reads the `Amount` column directly (already signed).
+- **Discover**: reads separate `Debit` and `Credit` columns (dollar-formatted, e.g. `$1,600.00`). The unified amount is `credit − debit`.
 
-Transactions are read row-by-row from the CSV. The `Transaction date` (expected in `MM/DD/YYYY` format) is normalized to `YYYY-MM-DD`. The `Amount` is converted to a float, and `Type` is stored in the `subtype` field.
+Each transaction is tagged with an `account_id` (`"wealthfront"` or `"discover"`) derived from the detected format.
+
+### Inter-Account Transfer Cancellation
+
+When importing from multiple sources in a single invocation, the parser detects inter-account transfers and removes them to avoid double-counting. The algorithm:
+
+1. Groups all parsed transactions by `(date, abs(amount))`.
+2. Within each group, greedily pairs one positive-amount transaction with one negative-amount transaction from a *different* `account_id`.
+3. Both sides of a matched pair are removed from the import set.
+
+This catches transfers like a Wealthfront deposit of `+2300` on 2025-01-17 paired with a Discover withdrawal of `−2300` on the same date.
 
 ### SQLite Schema & Deduplication
 
@@ -29,7 +51,8 @@ CREATE TABLE IF NOT EXISTS transactions (
 );
 ```
 
-Unlike the QFX parser which uses `FITID` as a natural key, statement exports have no unique transaction identifier. Deduplication uses a composite unique constraint on `(date, description, amount, account_id)` with `INSERT OR IGNORE`. For CSV imports, `account_id` defaults to an empty string. This means two genuinely identical transactions on the same day (same payee, same amount) would be deduplicated — an acceptable trade-off given how rare that is in practice.
+Unlike the QFX parser which uses `FITID` as a natural key, statement exports have no unique transaction identifier. Deduplication uses a composite unique constraint on `(date, description, amount, account_id)` with `INSERT OR IGNORE`. The `account_id` field now distinguishes transactions from different sources, so the same amount on the same date from different banks won't collide. Two genuinely identical transactions on the same day from the *same* account (same payee, same amount) would still be deduplicated — an acceptable trade-off given how rare that is in practice.
+
 
 ## github_repo_stat.py
 

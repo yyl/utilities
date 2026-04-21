@@ -22,10 +22,17 @@ This script reads a Parquet file, extracts and prints its schema using PyArrow, 
 
 ### `statement_parser.py`
 
-Parses Wealthfront bank statement CSVs and imports transactions into a SQLite database. Extracts date, description, amount, and subtype (Type) from the CSV. Deduplicates on `(date, description, amount, account_id)` — re-importing the same file is safe.
+Parses bank statement CSVs from multiple sources and imports them into a unified SQLite database. Auto-detects the CSV format from the header row.
 
-- Run it with: `uv run statement_parser.py data/wf.csv`
-- Supports multiple files at once: `uv run statement_parser.py data/*.csv`
+**Supported sources:**
+- **Wealthfront** — columns: `Transaction date, Description, Type, Amount`
+- **Discover** — columns: `Transaction Date, Transaction Description, Transaction Type, Debit, Credit, Balance`
+
+When importing from multiple sources at once, inter-account transfers (same date, matching amount, opposite signs across different accounts) are automatically cancelled to prevent double-counting. Deduplicates on `(date, description, amount, account_id)` — re-importing the same file is safe.
+
+- Run it with: `uv run statement_parser.py data/statements/wf_202501.csv`
+- Import multiple sources together: `uv run statement_parser.py data/statements/wf_202501.csv data/statements/discover_202501.csv`
+- Glob all statements: `uv run statement_parser.py data/statements/*.csv`
 - Optional flags:
   - `--db <path>` to specify the SQLite database path (default: `data/transactions.db`).
 
