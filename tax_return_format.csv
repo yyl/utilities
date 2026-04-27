@@ -1,4 +1,4 @@
-Form,Line,Year
+Form,Line,Description
 1040,1z,Total W2
 1040,2b,Taxable interest
 1040,3a,Qualified dividends
@@ -31,6 +31,7 @@ D,7,Net short term gain
 D,8a,Long term gain
 D,8b,Long term gain wash sale
 D,9,Long term gain no cost basis
+D,13,Capital gain distribution
 D,14,Long term carryover
 D,15,Net long term gain
 D,16,Capital gain
@@ -43,7 +44,7 @@ D,21,Capital loss limit
 8960,8,Total investment income
 8960,11,Total investment expenses
 540,11,Total exemption
-540,14,CA substractions
+540,14,CA subtractions
 540,16,CA additions
 540,17,CA gross income
 540,18,CA deductions

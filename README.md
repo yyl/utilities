@@ -25,6 +25,7 @@ This script reads a Parquet file, extracts and prints its schema using PyArrow, 
 Parses bank statement CSVs from multiple sources and imports them into a unified SQLite database. Auto-detects the CSV format from the header row.
 
 **Supported sources:**
+
 - **Wealthfront** — columns: `Transaction date, Description, Type, Amount`
 - **Discover** — columns: `Transaction Date, Transaction Description, Transaction Type, Debit, Credit, Balance`
 
@@ -70,15 +71,15 @@ Imports tax return data from a standardized local CSV file (exported from Google
 
 - Dynamically builds the SQLite schema based on the custom rows you define in the CSV (`Form` + `Line`).
 - Reads data from any column whose header is a 4-digit year.
+- Values of "NA" or "N/A" in the CSV are treated as NULL (not applicable or missing).
 - Stores imported return data in `tax_returns` and derived analysis data in `tax_return_analysis` within the same SQLite database.
 - Computes and saves:
   - YoY percent change for every imported field
   - Effective tax rate as `Total tax / Taxable income`
   - Capital gain short-vs-long ratio as `Schedule D net short-term / net long-term`
   - CA effective tax rate as `CA total tax / CA taxable income`
-- By default, looks for a file named `tax_return_format.csv` in the current directory.
-- Run the import with: `uv run tax_return_parser.py import` (or explicitly: `uv run tax_return_parser.py import --file tax_return_format.csv`)
+- By default, looks for `data/tax_return/returns.csv`.
+- Run the import with: `uv run tax_return_parser.py import` (or explicitly: `uv run tax_return_parser.py import --file data/tax_return/returns.csv`)
 - Generate and persist the analysis with: `uv run tax_return_parser.py analyze`
-- Query data with: `uv run tax_return_parser.py list` or `uv run tax_return_parser.py show --year 2024` or `uv run tax_return_parser.py dump`
 
 (See [docs/GUIDE.md](docs/GUIDE.md) for technical setup and architectural details under the hood.)

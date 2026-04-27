@@ -100,6 +100,10 @@ The repository used an earlier schema architecture involving pre-mapped YAML str
 
 Older forms will gracefully inherit updated tracking constraints without cascading query failures because the SQLite evolution is 100% backward compatible (the fields simply yield `NULL` when reading standard past-year models). The parser itself correctly validates all incoming string structures by recursively evaluating floating amounts for currency elements like `$` symbols, `(123)` negatives, and trailing whitespace sequences prior to injecting `REAL` variables locally.
 
+Values of `NA`, `N/A`, `null`, or `-` in the CSV are treated as `NULL` in the database. This handles cases where a form line is not applicable to a particular tax year (e.g., a form that didn't exist that year) or where data is simply missing.
+
+Rows with a `Form` value of `0` are treated as metadata (e.g., `0,0,Means,HR Block,...`) and skipped during schema and data extraction.
+
 ### Persisted Analysis Table
 
 The parser now stores derived multi-year analysis in a second SQLite table, `tax_return_analysis`, inside the same database as `tax_returns`.
