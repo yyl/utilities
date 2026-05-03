@@ -53,6 +53,12 @@ CREATE TABLE IF NOT EXISTS transactions (
 
 Unlike the QFX parser which uses `FITID` as a natural key, statement exports have no unique transaction identifier. Deduplication uses a composite unique constraint on `(date, description, amount, account_id)` with `INSERT OR IGNORE`. The `account_id` field now distinguishes transactions from different sources, so the same amount on the same date from different banks won't collide. Two genuinely identical transactions on the same day from the *same* account (same payee, same amount) would still be deduplicated — an acceptable trade-off given how rare that is in practice.
 
+### Analysis Table & Description Normalization
+
+After importing transactions, the script automatically rebuilds an `analysis` table from scratch. This single table uses a `group_type` discriminator column (`'total'`, `'description'`, or `'source_file'`) to store different annual aggregations while avoiding table sprawl.
+
+To improve the quality of merchant-level groupings, the parser normalises descriptions using regex by stripping out variable artifacts such as trailing transaction IDs (`-00000000`), masked account numbers (`(Account ****0000)`, `XXXXXXXXX`), and replacing arbitrary hyphens/underscores with spaces. The raw string is preserved in the `description` column of `transactions`, while the cleaned string is stored in `normalized_description` and used for the `analysis` grouping.
+
 
 ## github_repo_stat.py
 

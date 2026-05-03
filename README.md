@@ -31,6 +31,8 @@ Parses bank statement CSVs from multiple sources and imports them into a unified
 
 When importing from multiple sources at once, inter-account transfers (same date, matching amount, opposite signs across different accounts) are automatically cancelled to prevent double-counting. Deduplicates on `(date, description, amount, account_id)` — re-importing the same file is safe.
 
+After importing, automatically generates an `analysis` table with annual aggregations (totals, grouped by normalized description, and grouped by source file).
+
 - Run it with: `uv run statement_parser.py data/statements/wf_202501.csv`
 - Import multiple sources together: `uv run statement_parser.py data/statements/wf_202501.csv data/statements/discover_202501.csv`
 - Glob all statements: `uv run statement_parser.py data/statements/*.csv`

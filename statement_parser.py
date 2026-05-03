@@ -11,6 +11,11 @@ When multiple sources are imported together, inter-account transfers
 (same date, matching absolute amount, opposite signs) are automatically
 detected and excluded to prevent double-counting.
 
+After importing, an `analysis` table is rebuilt with annual aggregations:
+  - group_type='total':       overall spend/income per year
+  - group_type='description': spend/income per merchant per year
+  - group_type='source_file': spend/income per source file per year
+
 Usage:
     uv run statement_parser.py data/wf.csv
     uv run statement_parser.py data/wf.csv data/discover.csv
@@ -21,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import re
 import sqlite3
 import sys
 from pathlib import Path
@@ -101,6 +107,38 @@ def _parse_dollar(value: str) -> float:
         return 0.0
 
 
+# Patterns removed during description normalisation, applied in order.
+_NORM_PATTERNS: list[tuple[re.Pattern[str], str]] = [
+    # Parenthesised account references: "(Account ****0000)"
+    (re.compile(r"\s*\([^)]*\)"), ""),
+    # Masked digits: sequences of X's or *'s (with optional trailing digits)
+    (re.compile(r"[X*]{3,}\d*"), ""),
+    # Trailing numeric-ish IDs: "-00000000", "-A0000", "-999999999"
+    # Matches a separator followed by token(s) that are purely digits or
+    # a single letter + digits (like A0000), anchored to the end.
+    (re.compile(r"[-_ ]+(?:[A-Za-z]?\d{3,})(?:[-_ ]+\d+)*\s*$"), ""),
+    # Replace remaining hyphens / underscores between words with spaces
+    (re.compile(r"[-_]+"), " "),
+    # Collapse multiple spaces
+    (re.compile(r" {2,}"), " "),
+]
+
+
+def normalize_description(raw: str) -> str:
+    """Produce a canonical merchant/description for grouping.
+
+    Strips trailing transaction numbers, masked account digits,
+    parenthesised account references, and normalises separators so that
+    entries like 'Venmo-Payment-00000000' and 'Venmo-Payment-12345678'
+    both become 'Venmo Payment'.
+    """
+    text = raw.strip()
+    for pattern, repl in _NORM_PATTERNS:
+        text = pattern.sub(repl, text)
+    # Title-case for consistency, then strip
+    return text.strip().title()
+
+
 def parse_wealthfront(path: Path) -> list[dict[str, object]]:
     """Parse a Wealthfront statement CSV."""
     transactions: list[dict[str, object]] = []
@@ -120,6 +158,7 @@ def parse_wealthfront(path: Path) -> list[dict[str, object]]:
             transactions.append({
                 "date": normalize_date(date_str),
                 "description": description,
+                "normalized_description": normalize_description(description),
                 "amount": amount,
                 "subtype": subtype,
                 "category": "transaction",
@@ -160,6 +199,7 @@ def parse_discover(path: Path) -> list[dict[str, object]]:
             transactions.append({
                 "date": normalize_date(date_str),
                 "description": description,
+                "normalized_description": normalize_description(description),
                 "amount": amount,
                 "subtype": txn_type,
                 "category": "transaction",
@@ -239,24 +279,27 @@ def cancel_transfers(
 
 CREATE_TABLE_SQL = """\
 CREATE TABLE IF NOT EXISTS transactions (
-    id           INTEGER PRIMARY KEY AUTOINCREMENT,
-    date         TEXT NOT NULL,
-    description  TEXT NOT NULL,
-    amount       REAL NOT NULL,
-    subtype      TEXT,
-    category     TEXT NOT NULL DEFAULT 'transaction',
-    account_id   TEXT,
-    source_file  TEXT,
-    imported_at  TEXT DEFAULT (datetime('now')),
+    id                     INTEGER PRIMARY KEY AUTOINCREMENT,
+    date                   TEXT NOT NULL,
+    description            TEXT NOT NULL,
+    normalized_description TEXT NOT NULL DEFAULT '',
+    amount                 REAL NOT NULL,
+    subtype                TEXT,
+    category               TEXT NOT NULL DEFAULT 'transaction',
+    account_id             TEXT,
+    source_file            TEXT,
+    imported_at            TEXT DEFAULT (datetime('now')),
     UNIQUE(date, description, amount, account_id)
 );
 """
 
 INSERT_SQL = """\
 INSERT OR IGNORE INTO transactions
-    (date, description, amount, subtype, category, account_id, source_file)
+    (date, description, normalized_description, amount, subtype,
+     category, account_id, source_file)
 VALUES
-    (:date, :description, :amount, :subtype, :category, :account_id, :source_file);
+    (:date, :description, :normalized_description, :amount, :subtype,
+     :category, :account_id, :source_file);
 """
 
 
@@ -280,6 +323,107 @@ def write_to_sqlite(
 
     skipped = len(transactions) - inserted
     return inserted, skipped
+
+
+# ---------------------------------------------------------------------------
+# Analysis table
+# ---------------------------------------------------------------------------
+
+
+CREATE_ANALYSIS_TABLE_SQL = """\
+CREATE TABLE IF NOT EXISTS analysis (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    year         TEXT NOT NULL,
+    group_type   TEXT NOT NULL,   -- 'total', 'description', or 'source_file'
+    group_value  TEXT NOT NULL,   -- the grouping key (or 'all' for totals)
+    total_income REAL NOT NULL DEFAULT 0,
+    total_spend  REAL NOT NULL DEFAULT 0,
+    net          REAL NOT NULL DEFAULT 0,
+    txn_count    INTEGER NOT NULL DEFAULT 0,
+    computed_at  TEXT DEFAULT (datetime('now')),
+    UNIQUE(year, group_type, group_value)
+);
+"""
+
+_ANALYSIS_QUERIES = [
+    # Overall totals per year
+    (
+        "total",
+        """\
+        SELECT
+            substr(date, 1, 4)                              AS year,
+            'all'                                           AS group_value,
+            COALESCE(SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END), 0) AS total_income,
+            COALESCE(SUM(CASE WHEN amount < 0 THEN amount ELSE 0 END), 0) AS total_spend,
+            COALESCE(SUM(amount), 0)                        AS net,
+            COUNT(*)                                        AS txn_count
+        FROM transactions
+        GROUP BY year;
+        """,
+    ),
+    # Per-description per year (uses normalised description for grouping)
+    (
+        "description",
+        """\
+        SELECT
+            substr(date, 1, 4)                              AS year,
+            normalized_description                          AS group_value,
+            COALESCE(SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END), 0) AS total_income,
+            COALESCE(SUM(CASE WHEN amount < 0 THEN amount ELSE 0 END), 0) AS total_spend,
+            COALESCE(SUM(amount), 0)                        AS net,
+            COUNT(*)                                        AS txn_count
+        FROM transactions
+        GROUP BY year, normalized_description;
+        """,
+    ),
+    # Per-source_file per year
+    (
+        "source_file",
+        """\
+        SELECT
+            substr(date, 1, 4)                              AS year,
+            source_file                                     AS group_value,
+            COALESCE(SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END), 0) AS total_income,
+            COALESCE(SUM(CASE WHEN amount < 0 THEN amount ELSE 0 END), 0) AS total_spend,
+            COALESCE(SUM(amount), 0)                        AS net,
+            COUNT(*)                                        AS txn_count
+        FROM transactions
+        GROUP BY year, source_file;
+        """,
+    ),
+]
+
+
+def rebuild_analysis(db_path: Path) -> int:
+    """Drop and rebuild the analysis table from the transactions table.
+
+    Returns the number of analysis rows written.
+    """
+    conn = sqlite3.connect(str(db_path))
+    total_rows = 0
+    try:
+        conn.execute("DROP TABLE IF EXISTS analysis;")
+        conn.execute(CREATE_ANALYSIS_TABLE_SQL)
+
+        for group_type, query in _ANALYSIS_QUERIES:
+            for row in conn.execute(query).fetchall():
+                year, group_value, income, spend, net, count = row
+                conn.execute(
+                    """\
+                    INSERT INTO analysis
+                        (year, group_type, group_value,
+                         total_income, total_spend, net, txn_count)
+                    VALUES (?, ?, ?, ?, ?, ?, ?);
+                    """,
+                    (year, group_type, group_value, income, spend, net, count),
+                )
+                total_rows += 1
+
+        conn.commit()
+    finally:
+        conn.close()
+
+    return total_rows
 
 
 # ---------------------------------------------------------------------------
@@ -327,6 +471,10 @@ def main() -> None:
     print(
         f"\nTotal: {inserted} imported, {skipped} skipped → {args.db}"
     )
+
+    # Phase 4: Rebuild analysis table.
+    analysis_rows = rebuild_analysis(db_path)
+    print(f"Analysis: {analysis_rows} aggregation rows computed")
 
 
 if __name__ == "__main__":
