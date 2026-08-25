@@ -85,3 +85,25 @@ Imports tax return data from a standardized local CSV file (exported from Google
 - Generate and persist the analysis with: `uv run tax_return_parser.py analyze`
 
 (See [docs/GUIDE.md](docs/GUIDE.md) for technical setup and architectural details under the hood.)
+
+---
+
+### `mp4_to_gif.py`
+
+Converts video files (`.mp4`, `.mov`, `.m4v`, `.mkv`, `.webm`, `.avi`) into animated GIFs.
+
+- Uses `ffmpeg` (from `PATH` or bundled with `imageio-ffmpeg`) for high-quality two-pass palette conversion when available; otherwise falls back to pure-Python `imageio` + Pillow automatically.
+- Keeps the GIF under a size limit (default 10 MB) by automatically re-encoding at reduced width, framerate, and color count until it fits.
+- Batch mode processes every video in a directory with template-based output names.
+
+- Run it with: `uv run mp4_to_gif.py video.mp4`
+- Optional flags:
+  - `-o <path or template>` output path (single mode) or filename template (batch mode)
+  - `--fps <n>` output frame rate (default: 10)
+  - `--width <px>` output width, aspect ratio preserved (default: 480)
+  - `--max-size <mb>` output size limit in MB, `0` to disable (default: 10)
+  - `--start <s>` / `--end <s>` trim range in seconds
+  - `--loop <n>` GIF loop count, 0 = infinite
+  - `--backend auto|ffmpeg|imageio` force a conversion backend
+  - `-p .mp4 .mov` restrict extensions (batch mode only)
+- Batch mode: `uv run mp4_to_gif.py --batch ./clips/ -o "recap_%index%_%name%.gif"`. Templates support the placeholders `%name%`, `%extname%`, `%counter%`, `%i%`, and `%index%`.
