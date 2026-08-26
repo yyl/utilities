@@ -176,6 +176,7 @@ The `analyze` command computes derived metrics from the imported rows and then p
 
 ### Batch Mode
 
-- `find_videos` recursively scans for the default suffix set (`.mp4 .mov .m4v .mkv .webm .avi`) or whatever `-p` supplies, sorted by filename.
-- Each file converts inside a `try/except`; failures are reported and counted but never abort the batch.
+- `find_videos` recursively scans for the default suffix set (`.mp4 .mov .m4v .mkv .webm .avi`) or whatever `-p` supplies, sorted by relative path. It does not deduplicate basenames, so identically named files in separate subdirectories are each processed.
+- Each file converts inside a `try/except`; failures are reported and counted without aborting the remaining files. The process exits with status 1 if any conversion failed, allowing automation to detect partial batch failures.
+- The imageio backend raises `ConversionError` when its trim range contains no frames. Batch mode catches it like other conversion failures, while single-file mode reports it as a concise command-line error.
 - `make_output` resolves the `-o` template per file via `str.replace` rather than Python `%` formatting — a template containing `%i%` would be parsed as the int format specifier and crash under `%`-formatting. Placeholders: `%name%` (path stem — for `my.video.mp4` that is `my.video`), `%extname%` (lowercased extension), `%counter%`/`%i%` (1-based ordinal), `%index%` (1-based, zero-padded to 4 digits). A template without placeholders is used verbatim, and any resulting path lacking a `.gif` suffix gets one appended.

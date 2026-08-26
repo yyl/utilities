@@ -94,7 +94,7 @@ Converts video files (`.mp4`, `.mov`, `.m4v`, `.mkv`, `.webm`, `.avi`) into anim
 
 - Uses `ffmpeg` (from `PATH` or bundled with `imageio-ffmpeg`) for high-quality two-pass palette conversion when available; otherwise falls back to pure-Python `imageio` + Pillow automatically.
 - Keeps the GIF under a size limit (default 10 MB) by automatically re-encoding at reduced width, framerate, and color count until it fits.
-- Batch mode processes every video in a directory with template-based output names.
+- Batch mode recursively processes every matching video, including files with the same name in different subdirectories. It continues after conversion failures and exits nonzero if any file fails.
 
 - Run it with: `uv run mp4_to_gif.py video.mp4`
 - Optional flags:

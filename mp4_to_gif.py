@@ -38,6 +38,10 @@ DEFAULT_WIDTH: int = 480
 DEFAULT_MAX_SIZE_MB: float = 10.0
 
 
+class ConversionError(Exception):
+    """Raised when a video cannot be converted."""
+
+
 def find_ffmpeg() -> str | None:
     """Find ffmpeg on system PATH or via imageio-ffmpeg bundle."""
     exe = shutil.which("ffmpeg")
@@ -152,7 +156,7 @@ def convert_with_imageio(
     reader.close()
 
     if not pil_frames:
-        raise SystemExit("Error: no frames read from the video (check --start/--end).")
+        raise ConversionError("no frames read from the video (check --start/--end)")
     if len(pil_frames) > 2000:
         print(
             f"Warning: {len(pil_frames)} frames is a lot for a GIF; "
@@ -295,13 +299,14 @@ def convert_mp4_to_gif(
 
 def find_videos(directory: Path, suffixes: set[str]) -> list[Path]:
     """Return sorted regular files under directory with a matching suffix."""
-    found: list[Path] = []
-    seen: set[str] = set()
-    for p in sorted(directory.rglob("*"), key=lambda x: x.name):
-        if p.is_file() and p.suffix.lower() in suffixes and p.name not in seen:
-            seen.add(p.name)
-            found.append(p)
-    return found
+    return sorted(
+        (
+            path
+            for path in directory.rglob("*")
+            if path.is_file() and path.suffix.lower() in suffixes
+        ),
+        key=lambda path: str(path.relative_to(directory)).lower(),
+    )
 
 
 def make_output(template: str | None, video: Path, counter: int) -> Path:
@@ -311,9 +316,9 @@ def make_output(template: str | None, video: Path, counter: int) -> Path:
 
     resolved = template
     if "%name%" in resolved or "%extname%" in resolved:
-        resolved = resolved.replace(
-            "%name%", video.stem
-        ).replace("%extname%", video.suffix.lstrip(".").lower())
+        resolved = resolved.replace("%name%", video.stem).replace(
+            "%extname%", video.suffix.lstrip(".").lower()
+        )
     if "%counter%" in resolved or "%i%" in resolved or "%index%" in resolved:
         resolved = (
             resolved.replace("%counter%", str(counter))
@@ -323,9 +328,7 @@ def make_output(template: str | None, video: Path, counter: int) -> Path:
 
     resolved = Path(resolved)
     return (
-        resolved
-        if resolved.suffix.lower() == ".gif"
-        else resolved.with_suffix(".gif")
+        resolved if resolved.suffix.lower() == ".gif" else resolved.with_suffix(".gif")
     )
 
 
@@ -472,6 +475,8 @@ def main() -> None:
                 failed += 1
 
         print(f"\nBatch done. {ok} converted, {failed} failed.")
+        if failed:
+            raise SystemExit(1)
         return
 
     # --- Single File Mode ---
@@ -508,18 +513,21 @@ def main() -> None:
         except ImportError:
             sys.exit("Error: imageio missing. Run: uv pip install imageio[pillow]")
 
-    convert_mp4_to_gif(
-        input_path=args.input,
-        output_path=output,
-        backend=backend,
-        ffmpeg=ffmpeg_bin,
-        fps=fps,
-        width=width,
-        start=start,
-        end=args.end,
-        loop=loop,
-        max_size_mb=max_size_mb,
-    )
+    try:
+        convert_mp4_to_gif(
+            input_path=args.input,
+            output_path=output,
+            backend=backend,
+            ffmpeg=ffmpeg_bin,
+            fps=fps,
+            width=width,
+            start=start,
+            end=args.end,
+            loop=loop,
+            max_size_mb=max_size_mb,
+        )
+    except ConversionError as error:
+        sys.exit(f"Error: {error}")
 
     final_size_mb = output.stat().st_size / (1024 * 1024)
     print(f"Done: {output} ({final_size_mb:.2f} MB)")
