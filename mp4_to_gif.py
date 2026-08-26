@@ -236,6 +236,7 @@ def convert_mp4_to_gif(
     loop: int,
     max_size_mb: float,
 ) -> None:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     curr_fps = fps
     curr_width = width
     curr_colors = 256
@@ -353,7 +354,7 @@ def main() -> None:
         dest="template",
         type=str,
         default=None,
-        help="Output filename template. Works for both single and batch: for single it overrides the output path, e.g '-o out.gif'; for batch use '%name%', '%index%' (e.g. 'recap_%index%_%name%.gif').",
+        help="Output filename template. Works for both single and batch: for single it overrides the output path, e.g '-o out.gif'; for batch use '%%name%%', '%%index%%' (e.g. 'recap_%%index%%_%%name%%.gif').",
     )
     parser.add_argument(
         "-p",

@@ -98,7 +98,7 @@ Converts video files (`.mp4`, `.mov`, `.m4v`, `.mkv`, `.webm`, `.avi`) into anim
 
 - Run it with: `uv run mp4_to_gif.py video.mp4`
 - Optional flags:
-  - `-o <path or template>` output path (single mode) or filename template (batch mode)
+  - `-o <path or template>` output path (single mode) or filename template (batch mode; parent directories are created automatically)
   - `--fps <n>` output frame rate (default: 10)
   - `--width <px>` output width, aspect ratio preserved (default: 480)
   - `--max-size <mb>` output size limit in MB, `0` to disable (default: 10)
