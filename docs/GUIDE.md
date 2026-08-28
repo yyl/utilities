@@ -2,6 +2,12 @@
 
 This document contains technical details, under-the-hood implementations, and architectural notes for the scripts in this repository.
 
+## `doc_to_markdown.py`
+
+The document extractor downloads each URL with `urllib.request`, parses it using Beautiful Soup, selects the configured main-content element, and converts only that element through `markdownify`. It removes non-content `script`, `style`, `noscript`, and `template` nodes before conversion, and resolves relative links and image URLs against the source page so the resulting Markdown remains usable outside the original site.
+
+`doc_content_selectors.json` is a JSON object mapping URL prefixes to CSS selectors. A caller-provided `--selector` takes priority; otherwise, the extractor chooses the longest matching prefix, which allows broad per-site defaults and narrower exceptions. If no mapping applies, it falls back to the page's `<main>` element and then `<body>`. The output includes a source URL and retains the article's H1; if the article has no H1, the HTML document title becomes the H1. One URL can write to a file; multiple URLs require an output directory and derive safe filenames from their paths.
+
 ## `statement_parser.py`
 
 ### Format Auto-Detection

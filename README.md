@@ -107,3 +107,15 @@ Converts video files (`.mp4`, `.mov`, `.m4v`, `.mkv`, `.webm`, `.avi`) into anim
   - `--backend auto|ffmpeg|imageio` force a conversion backend
   - `-p .mp4 .mov` restrict extensions (batch mode only)
 - Batch mode: `uv run mp4_to_gif.py --batch ./clips/ -o "recap_%index%_%name%.gif"`. Templates support the placeholders `%name%`, `%extname%`, `%counter%`, `%i%`, and `%index%`.
+
+---
+
+### `doc_to_markdown.py`
+
+Downloads developer documentation, extracts its main content, and converts it to Markdown with a source URL, absolute links, headings, code blocks, lists, and tables preserved for agent consumption.
+
+- Print one converted document: `uv run doc_to_markdown.py https://docs.foursquare.com/fsq-developers-places/reference/authentication`
+- Write one document: `uv run doc_to_markdown.py <url> -o docs/authentication.md`
+- Convert several URLs into a directory: `uv run doc_to_markdown.py <url1> <url2> -o docs/extracted/`
+- Use a one-off CSS selector: `uv run doc_to_markdown.py <url> --selector "article.docs#content"`
+- Configure site-wide selectors in `doc_content_selectors.json`, which maps URL prefixes to CSS selectors. The built-in Foursquare mapping uses `article.rm-Article#content`; the longest matching prefix wins.
