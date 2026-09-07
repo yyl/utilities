@@ -8,6 +8,8 @@ The document extractor downloads each URL with `urllib.request`, parses it using
 
 `doc_content_selectors.json` is a JSON object mapping URL prefixes to CSS selectors. A caller-provided `--selector` takes priority; otherwise, the extractor chooses the longest matching prefix, which allows broad per-site defaults and narrower exceptions. If no mapping applies, it falls back to the page's `<main>` element and then `<body>`. The output includes a source URL and retains the article's H1; if the article has no H1, the HTML document title becomes the H1. One URL can write to a file; multiple URLs require an output directory and derive safe filenames from their paths.
 
+For sites whose content is rendered by client-side JavaScript (e.g. SPA doc shells where `urllib` only sees an empty `<div id="app">`), `--html-file` accepts a locally-saved HTML file instead. Save the rendered DOM from the browser ("Save Page As… Complete") and pass it via `--html-file path/to/page.html`. To keep selector prefix matching and the `Source:` line accurate, supply the original URL with `--source-url`; without it, the file path stem is used as the source label. Output-file derivation handles `file://` URIs (basename stem) as well as HTTP URLs (path-derived stem), so the existing single-file vs. directory rules continue to apply.
+
 ## `statement_parser.py`
 
 ### Format Auto-Detection

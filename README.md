@@ -119,3 +119,4 @@ Downloads developer documentation, extracts its main content, and converts it to
 - Convert several URLs into a directory: `uv run doc_to_markdown.py <url1> <url2> -o docs/extracted/`
 - Use a one-off CSS selector: `uv run doc_to_markdown.py <url> --selector "article.docs#content"`
 - Configure site-wide selectors in `doc_content_selectors.json`, which maps URL prefixes to CSS selectors. The built-in Foursquare mapping uses `article.rm-Article#content`; the longest matching prefix wins.
+- Convert a locally-saved HTML file (for JS-rendered docs that can't be fetched with `urllib`): save the page in a browser, then run `uv run doc_to_markdown.py --html-file path/to/page.html --source-url https://... -o docs/page.md`. `--source-url` drives selector prefix matching and the `Source:` line; without it, the file path stem is used.

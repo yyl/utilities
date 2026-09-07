@@ -1,3 +1,4 @@
 {
-  "https://docs.foursquare.com/fsq-developers-places/": "article.rm-Article#content"
+  "https://docs.foursquare.com/fsq-developers-places/": "article.rm-Article#content",
+  "https://www.bricklink.com/v3/api.page?": "section.api-main > section"
 }

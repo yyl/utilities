@@ -24,12 +24,16 @@ def parse_args():
         description="Download developer documentation and extract its main content as Markdown.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument("urls", nargs="+", help="Documentation URL(s) to convert.")
+    parser.add_argument(
+        "urls",
+        nargs="*",
+        help="Documentation URL(s) to convert. Omit when using --html-file.",
+    )
     parser.add_argument(
         "-o",
         "--output",
         help=(
-            "Output Markdown file for one URL, or output directory for multiple URLs. "
+            "Output Markdown file for one source, or output directory for multiple sources. "
             "Prints to stdout when omitted."
         ),
     )
@@ -49,7 +53,28 @@ def parse_args():
         default=30,
         help="HTTP request timeout in seconds.",
     )
-    return parser.parse_args()
+    parser.add_argument(
+        "--html-file",
+        type=Path,
+        help=(
+            "Convert a locally-saved HTML file instead of fetching over HTTP. "
+            "Useful for JS-rendered docs that can't be fetched with urllib. "
+            "The path stem is used for output naming unless --source-url is given, "
+            "in which case the source URL also drives selector prefix matching."
+        ),
+    )
+    parser.add_argument(
+        "--source-url",
+        help="Original page URL for a --html-file input. Used for selector prefix matching and source attribution.",
+    )
+    args = parser.parse_args()
+    if args.urls and args.html_file:
+        parser.error("Pass either positional URLs or --html-file, not both.")
+    if args.html_file and not args.urls:
+        args.urls = [args.source_url or args.html_file.resolve().as_uri()]
+    if not args.urls:
+        parser.error("At least one URL or --html-file is required.")
+    return args
 
 
 def load_selector_mappings(path):
@@ -95,6 +120,15 @@ def fetch_html(url, timeout):
         raise ValueError(f"Request failed with HTTP {error.code}: {error.reason}") from error
     except URLError as error:
         raise ValueError(f"Could not fetch URL: {error.reason}") from error
+
+
+def read_html_file(path):
+    try:
+        return path.read_bytes()
+    except FileNotFoundError:
+        raise ValueError(f"HTML file does not exist: {path}") from None
+    except OSError as error:
+        raise ValueError(f"Could not read HTML file {path}: {error}") from error
 
 
 def absolutize_urls(content, page_url):
@@ -160,7 +194,10 @@ def convert_html(url, html, selector):
 
 def output_path_for_url(url, output):
     parsed = urlparse(url)
-    stem = re.sub(r"[^A-Za-z0-9._-]+", "-", parsed.path.strip("/")) or "index"
+    if parsed.scheme and parsed.scheme != "file":
+        stem = re.sub(r"[^A-Za-z0-9._-]+", "-", parsed.path.strip("/")) or "index"
+    else:
+        stem = Path(parsed.path).stem or "index"
     return output / f"{stem}.md"
 
 
@@ -185,7 +222,7 @@ def main():
         print("--timeout must be greater than zero.", file=sys.stderr)
         return 2
     if len(args.urls) > 1 and args.output and Path(args.output).suffix:
-        print("--output must be a directory when converting multiple URLs.", file=sys.stderr)
+        print("--output must be a directory when converting multiple sources.", file=sys.stderr)
         return 2
 
     try:
@@ -198,7 +235,11 @@ def main():
     for url in args.urls:
         selector = selector_for_url(url, mappings, args.selector)
         try:
-            markdown = convert_html(url, fetch_html(url, args.timeout), selector)
+            if args.html_file and url == args.urls[0]:
+                html = read_html_file(args.html_file)
+            else:
+                html = fetch_html(url, args.timeout)
+            markdown = convert_html(url, html, selector)
             write_output(url, markdown, args.output, len(args.urls) > 1)
         except ValueError as error:
             print(f"Error converting {url}: {error}", file=sys.stderr)

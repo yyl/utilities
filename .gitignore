@@ -2,6 +2,7 @@ data
 stats
 .DS_Store
 generate_synthetic.py
+contexts/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

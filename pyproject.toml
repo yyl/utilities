@@ -19,5 +19,5 @@ dependencies = [
     "pdfplumber",
     "imageio[ffmpeg,pillow]==2.36.1",
     "beautifulsoup4>=4.15.0",
-    "markdownify>=1.2.3",
+    "markdownify>=1.2.3"
 ]
